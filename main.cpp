@@ -13,6 +13,12 @@
 //#include "GUI.h"
 
 
+enum class FigureType {
+    Rectangle,// Прямоугольник
+    Circle,   // Круг
+    Triangle  // Треугольник (работает криво)
+};
+
 
 class Paint {
 private:
@@ -34,7 +40,20 @@ private:
     //ImTextureID iconTextureID; // ImGui-совместимая текстура
     bool isFilling = false; // Флаг инструмента "Заливка"
 
-    bool isSelecting = false;
+
+    bool isSelecting = false;               // Флаг режима выделения
+    sf::Vector2f selectionStart;            // Начальная позиция выделения
+    sf::Vector2f selectionEnd;              // Конечная позиция выделения
+    sf::Image selectionBuffer;              // Буфер для хранения выделенных пикселей
+    sf::Vector2f selectionOffset;           // Смещение выделения при перемещении
+    bool isMovingSelection = false;         // Флаг перемещения выделения
+
+
+
+    FigureType currentFigure = FigureType::Rectangle; // Текущая фигура
+    sf::Vector2f figureStartPos;             // Начальная позиция рисования фигуры
+    bool isDrawingFigure = false;            // Флаг рисования фигуры
+
 
 
 
@@ -59,15 +78,12 @@ public:
         canvasView = window.getDefaultView();
     }
 
-
-
     void run() {
         sf::Clock deltaClock;
         while (window.isOpen()) {
             sf::Event event;
             while (window.pollEvent(event)) {
                 ImGui::SFML::ProcessEvent(event);
-
                 if (event.type == sf::Event::Closed) {
                     window.close();
                 }
@@ -103,12 +119,129 @@ public:
                     lastMousePos = mousePos; // Обновляем предыдущую позицию мыши
                 }
 
-
-                // Начало перемещения холста (средняя кнопка мыши)
-                if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Middle) {
-                    lastMousePos = sf::Mouse::getPosition(window);
+                // Начало рисования фигуры (левая кнопка мыши)
+                if (event.type == sf::Event::MouseButtonPressed &&
+                    event.mouseButton.button == sf::Mouse::Right &&
+                    !ImGui::IsAnyItemHovered())
+                {
+                    if (currentFigure == FigureType::Rectangle ||
+                        currentFigure == FigureType::Circle ||
+                        currentFigure == FigureType::Triangle)
+                    {
+                        isDrawingFigure = true;
+                        figureStartPos = window.mapPixelToCoords(
+                            sf::Vector2i(event.mouseButton.x, event.mouseButton.y)
+                        );
+                    }
                 }
-                // Масштабирование колесом мыши /notwork
+
+                // Завершение рисования фигуры
+                if (event.type == sf::Event::MouseButtonReleased &&
+                    event.mouseButton.button == sf::Mouse::Right &&
+                    isDrawingFigure)
+                {
+                    isDrawingFigure = false;
+                    sf::Vector2f endPos = window.mapPixelToCoords(
+                        sf::Vector2i(event.mouseButton.x, event.mouseButton.y)
+                    );
+
+                    // Рисуем фигуру
+                    switch (currentFigure) {
+                    case FigureType::Rectangle:
+                        drawRectangle(figureStartPos, endPos);
+                        break;
+                    case FigureType::Circle:
+                        drawCircle(figureStartPos, endPos);
+                        break;
+                    case FigureType::Triangle:
+                        drawLine(figureStartPos, endPos);
+                        break;
+                    default:
+                        break;
+                    }
+                }
+
+
+
+
+                // Начало выделения (левая кнопка мыши)
+                if (event.type == sf::Event::MouseButtonPressed &&
+                    event.mouseButton.button == sf::Mouse::Left &&
+                    !ImGui::IsAnyItemHovered())
+                {
+                    if (isSelecting) {
+                        // Начало выделения области
+                        selectionStart = window.mapPixelToCoords(
+                            sf::Vector2i(event.mouseButton.x, event.mouseButton.y)
+                        );
+                    }
+                    else if (isMovingSelection) {
+                        // Начало перемещения выделения
+                        isMousePressed = false;
+                        selectionOffset = window.mapPixelToCoords(
+                            sf::Vector2i(event.mouseButton.x, event.mouseButton.y)
+                        ) - selectionStart;
+                    }
+                }
+
+                // Завершение выделения (отпускание левой кнопки мыши)
+                if (event.type == sf::Event::MouseButtonReleased &&
+                    event.mouseButton.button == sf::Mouse::Left)
+                {
+                    if (isSelecting) {
+                        selectionEnd = window.mapPixelToCoords(
+                            sf::Vector2i(event.mouseButton.x, event.mouseButton.y)
+                        );
+
+                        // Копирование выделенных пикселей в буфер
+                        int width = static_cast<int>(std::abs(selectionEnd.x - selectionStart.x));
+                        int height = static_cast<int>(std::abs(selectionEnd.y - selectionStart.y));
+                        selectionBuffer.create(width, height, sf::Color::Transparent);
+
+                        for (int x = 0; x < width; ++x) {
+                            for (int y = 0; y < height; ++y) {
+                                int px = static_cast<int>(selectionStart.x) + x;
+                                int py = static_cast<int>(selectionStart.y) + y;
+                                if (px >= 0 && py >= 0 && px < canvasSize.x && py < canvasSize.y) {
+                                    selectionBuffer.setPixel(x, y, canvasImage.getPixel(px, py));
+                                }
+                            }
+                        }
+
+                        isSelecting = false;
+                        isMovingSelection = true; // режим перемещения
+                    }
+                    else if (isMovingSelection) {
+                        // Вставка выделенных пикселей на новое место
+                        sf::Vector2f newPos = window.mapPixelToCoords(
+                            sf::Vector2i(event.mouseButton.x, event.mouseButton.y)
+                        ) - selectionOffset;
+
+                        for (int x = 0; x < selectionBuffer.getSize().x; ++x) {
+                            for (int y = 0; y < selectionBuffer.getSize().y; ++y) {
+                                int px = static_cast<int>(newPos.x) + x;
+                                int py = static_cast<int>(newPos.y) + y;
+                                if (px >= 0 && py >= 0 && px < canvasSize.x && py < canvasSize.y) {
+                                    canvasImage.setPixel(px, py, selectionBuffer.getPixel(x, y));
+                                }
+                            }
+                        }
+
+                        isSelecting = true; // Кнопка активна после выделения
+                        isMovingSelection = false; // Завершаем перемещение
+                        canvasTexture.loadFromImage(canvasImage);
+                    }
+                }
+
+                // Перемещение выделения
+                if (isMovingSelection && sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
+                    sf::Vector2f mousePos = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+                    selectionStart = mousePos - selectionOffset;
+                }
+
+
+               
+                // Масштабирование колесом мыши
                 if (event.type == sf::Event::MouseWheelScrolled) {
                     if (event.mouseWheelScroll.wheel == sf::Mouse::VerticalWheel) {
                         // Изменение уровня масштабирования с ограничениями
@@ -118,16 +251,24 @@ public:
                         canvasView.setCenter(window.getSize().x / 2, window.getSize().y / 2);
                     }
                 }
+
+                // Начало перемещения холста колесом мыши
+                if (event.type == sf::Event::MouseButtonPressed && event.mouseButton.button == sf::Mouse::Middle) {
+                    lastMousePos = sf::Mouse::getPosition(window);
+                }
             }
 
-
-
-
+            // Перемещение холста при зажатой средней кнопке мыши
+            if (sf::Mouse::isButtonPressed(sf::Mouse::Middle)) {
+                sf::Vector2i mouseDelta = sf::Mouse::getPosition(window) - lastMousePos;
+                canvasView.move(-mouseDelta.x * zoomLevel, -mouseDelta.y * zoomLevel);
+                lastMousePos = sf::Mouse::getPosition(window);
+            }
 
             ImGui::SFML::Update(window, deltaClock.restart());
+
+            // Отрисовка интерфейса
             drawGUI();
-
-
 
             // заливка (если инструмент активен и курсор не над интерфейсом)
             if (isFilling && sf::Mouse::isButtonPressed(sf::Mouse::Left) && !ImGui::IsAnyItemHovered()) {
@@ -146,6 +287,30 @@ public:
             window.clear();
             window.setView(canvasView);
             window.draw(canvasSprite);
+
+
+            // Отрисовка прямоугольника выделения
+            if (isSelecting && sf::Mouse::isButtonPressed(sf::Mouse::Left)) {
+                sf::Vector2f currentMousePos = window.mapPixelToCoords(sf::Mouse::getPosition(window));
+                sf::RectangleShape selectionRect;
+                selectionRect.setPosition(selectionStart);
+                selectionRect.setSize(currentMousePos - selectionStart);
+                selectionRect.setFillColor(sf::Color::Transparent);
+                selectionRect.setOutlineColor(sf::Color::Red);
+                selectionRect.setOutlineThickness(1);
+                window.draw(selectionRect);
+            }
+
+            // Отрисовка перемещаемой области
+            if (isMovingSelection) {
+                sf::Sprite selectionSprite;
+                sf::Texture selectionTexture;
+                selectionTexture.loadFromImage(selectionBuffer);
+                selectionSprite.setTexture(selectionTexture);
+                selectionSprite.setPosition(selectionStart);
+                window.draw(selectionSprite);
+            }
+
 
             window.setView(window.getDefaultView());
             ImGui::SFML::Render(window);
@@ -192,14 +357,11 @@ public:
         // размер кнопок
         ImGui::PushStyleVar(ImGuiStyleVar_FramePadding, ImVec2(5, 5));
 
-
-
         // Кнопка с иконкой для выпадающего меню
         //ImTextureID textureID = (ImTextureID)(void*)PaintButtonTexture.getNativeHandle();
         //if (ImGui::ImageButton(textureID, ImVec2(30, 30))) { // Кнопка с иконкой
         //    ImGui::OpenPopup("ColorMenu"); // Открываем выпадающее меню
         //}
-
 
         // кнопка для выпадающего меню цветов
         if (ImGui::Button("C", ImVec2(30, 30))) {
@@ -212,6 +374,30 @@ public:
                 currentColor.r = static_cast<sf::Uint8>(color[0] * 255);
                 currentColor.g = static_cast<sf::Uint8>(color[1] * 255);
                 currentColor.b = static_cast<sf::Uint8>(color[2] * 255);
+            }
+            ImGui::EndPopup();
+        }
+
+        ImGui::SameLine(); // следующий элемент на той же линии
+
+        // кнопка для выпадающего меню фигур
+        if (ImGui::Button("F", ImVec2(30, 30))) {
+            ImGui::OpenPopup("FigureMenu"); // Открываем выпадающее меню
+        }
+
+        // Выпадающее меню для выбора figure
+        if (ImGui::BeginPopup("FigureMenu", ImGuiWindowFlags_NoMove | ImGuiWindowFlags_NoResize)) {
+            if (ImGui::Button("Circle")) {
+                currentFigure = FigureType::Circle;
+                ImGui::CloseCurrentPopup(); // Закрываем меню после выбора
+            }
+            if (ImGui::Button("Rectangle")) {
+                currentFigure = FigureType::Rectangle;
+                ImGui::CloseCurrentPopup();
+            }
+            if (ImGui::Button("Triangle")) {
+                currentFigure = FigureType::Triangle;
+                ImGui::CloseCurrentPopup();
             }
             ImGui::EndPopup();
         }
@@ -243,9 +429,7 @@ public:
                 filename,
                 1,
                 filters,
-                "PNG file (*.png)"
-            );
-
+                "PNG file (*.png)");
             if (savePath) {
                 std::string path = savePath;
                 std::replace(path.begin(), path.end(), '\\', '/'); // Заменяем обратные слэши на прямые
@@ -281,13 +465,24 @@ public:
             isMousePressed = false;
         }
 
+        /*if (ImGui::Button("Rectangle")) currentTool = ToolType::Rectangle;
+        ImGui::SameLine();
+        if (ImGui::Button("Circle")) drawCircle();*/
+
         ImGui::SameLine(); // следующий элемент на той же линии
 
         // Кнопка выделения
         if (ImGui::Button("Select", ImVec2(80, 0))) {
-            isSelecting = !isSelecting; // режим
-            isMousePressed = false;
-            isFilling = false;
+            if (isSelecting || isMovingSelection) {
+                isSelecting = false;
+                isMovingSelection = false;
+                isFilling = false;
+                isMousePressed = false;
+            }
+            else {
+                isSelecting = true;
+                isMovingSelection = false;
+            }
         }
 
         ImGui::SameLine(); // следующий элемент на той же линии
@@ -295,6 +490,57 @@ public:
 
         ImGui::PopStyleVar(); // Возвращаем стандартный размер кнопок
         ImGui::End();
+    }
+
+    // fix triangle
+    void drawTriangle(const sf::Vector2f& position) {
+        int size = brushSize * 2; // Размер треугольника
+        for (int x = -size; x <= size; ++x) {
+            for (int y = -size; y <= size; ++y) {
+                if (std::abs(x) + std::abs(y) <= size) { // Условие для треугольника
+                    int px = static_cast<int>(position.x + x);
+                    int py = static_cast<int>(position.y + y);
+                    if (px >= 0 && py >= 0 && px < canvasSize.x && py < canvasSize.y) {
+                        canvasImage.setPixel(px, py, isErasing ? sf::Color::White : currentColor);
+                    }
+                }
+            }
+        }
+        canvasTexture.loadFromImage(canvasImage);
+    }
+
+    void drawRectangle(const sf::Vector2f& start, const sf::Vector2f& end) {
+        sf::Vector2f size = end - start;
+        for (int x = 0; x <= std::abs(size.x); ++x) {
+            for (int y = 0; y <= std::abs(size.y); ++y) {
+                int px = static_cast<int>(start.x + (size.x > 0 ? x : -x));
+                int py = static_cast<int>(start.y + (size.y > 0 ? y : -y));
+                if (px >= 0 && py >= 0 && px < canvasSize.x && py < canvasSize.y) {
+                    canvasImage.setPixel(px, py, isErasing ? sf::Color::White : currentColor);
+                }
+            }
+        }
+        canvasTexture.loadFromImage(canvasImage);
+    }
+
+    void drawCircle(const sf::Vector2f& center, const sf::Vector2f& edge) {
+        float radius = std::sqrt(
+            (edge.x - center.x) * (edge.x - center.x) +
+            (edge.y - center.y) * (edge.y - center.y)
+        );
+
+        for (int x = -radius; x <= radius; ++x) {
+            for (int y = -radius; y <= radius; ++y) {
+                if (x * x + y * y <= radius * radius) {
+                    int px = static_cast<int>(center.x + x);
+                    int py = static_cast<int>(center.y + y);
+                    if (px >= 0 && py >= 0 && px < canvasSize.x && py < canvasSize.y) {
+                        canvasImage.setPixel(px, py, isErasing ? sf::Color::White : currentColor);
+                    }
+                }
+            }
+        }
+        canvasTexture.loadFromImage(canvasImage);
     }
 
     void drawFill(sf::Vector2i startPos, sf::Color newColor) {
