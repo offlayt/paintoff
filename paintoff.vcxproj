@@ -130,11 +130,16 @@
     <ClCompile Include="main.cpp" />
   </ItemGroup>
   <ItemGroup>
-    <ClInclude Include="Canvas.h" />
-    <ClInclude Include="GUI.h" />
     <ClInclude Include="Paint.h" />
-    <ClInclude Include="Tools.h" />
-    <ClInclude Include="src.h" />
+    <ClInclude Include="Figures.h" />
+    <ClInclude Include="resource.h" />
+  </ItemGroup>
+  <ItemGroup>
+    <ResourceCompile Include="paintoff.rc" />
+  </ItemGroup>
+  <ItemGroup>
+    <Image Include="canvas.ico" />
+    <Image Include="icon1.ico" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">
